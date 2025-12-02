@@ -263,7 +263,17 @@ def rigid_transform_Kabsch_3D_torch_batch(A, B):
     H = torch.bmm(Am, Bm.transpose(1, 2))
 
     # find rotation
-    U, S, Vt = torch.linalg.svd(H)
+    try:
+        U, S, Vt = torch.linalg.svd(H)
+    except Exception:
+        # Fallback for ill-conditioned batches: add tiny jitter, fall back to CPU if needed.
+        eye = torch.eye(3, device=H.device, dtype=H.dtype).unsqueeze(0).expand_as(H)
+        jittered = H + 1e-6 * eye
+        try:
+            U, S, Vt = torch.linalg.svd(jittered)
+        except Exception:
+            U, S, Vt = torch.linalg.svd(jittered.cpu())
+            U, S, Vt = U.to(H.device), S.to(H.device), Vt.to(H.device)
     R = torch.bmm(Vt.transpose(1, 2), U.transpose(1, 2))
 
     # reflection case
@@ -312,7 +322,6 @@ def rigid_transform_Kabsch_independent_torch(A, B):
     t = - centroid_A + centroid_B # note does not change rotation
     R_vec = matrix_to_axis_angle(R)
     return t, R_vec
-
 
 
 

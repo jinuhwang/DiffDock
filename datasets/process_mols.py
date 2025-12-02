@@ -442,25 +442,36 @@ def read_molecule(molecule_file, sanitize=False, calc_charges=False, remove_hs=F
         raise ValueError('Expect the format of the molecule_file to be '
                          'one of .mol2, .sdf, .pdbqt and .pdb, got {}'.format(molecule_file))
 
-    try:
-        if sanitize or calc_charges:
-            Chem.SanitizeMol(mol)
+    if mol is None:
+        get_logger().warning(f"RDKit returned None for molecule: {molecule_file}")
+        return None
 
-        if calc_charges:
-            # Compute Gasteiger charges on the molecule.
+    def _prepare_molecule(base_mol, do_sanitize, do_charges, do_remove_hs):
+        processed = Chem.Mol(base_mol)
+        if do_sanitize or do_charges:
+            Chem.SanitizeMol(processed)
+        if do_charges:
             try:
-                AllChem.ComputeGasteigerCharges(mol)
-            except:
+                AllChem.ComputeGasteigerCharges(processed)
+            except Exception:
                 warnings.warn('Unable to compute charges for the molecule.')
+        if do_remove_hs:
+            processed = Chem.RemoveHs(processed, sanitize=do_sanitize)
+        return processed
 
-        if remove_hs:
-            mol = Chem.RemoveHs(mol, sanitize=sanitize)
-
-    except Exception as e:
-        # Print stacktrace
+    try:
+        return _prepare_molecule(mol, sanitize, calc_charges, remove_hs)
+    except Exception as exc:
+        if sanitize:
+            # Retry without sanitization so badly formed ligands can still be profiled.
+            get_logger().warning(
+                f"Failed to sanitize molecule ({exc}); retrying without sanitization: {molecule_file}"
+            )
+            try:
+                return _prepare_molecule(mol, False, False, remove_hs)
+            except Exception:
+                pass
         import traceback
         msg = traceback.format_exc()
         get_logger().warning(f"Failed to process molecule: {molecule_file}\n{msg}")
         return None
-
-    return mol

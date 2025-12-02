@@ -299,7 +299,14 @@ def main(args):
                         visualization_list[batch_idx].write(os.path.join(write_dir, f'rank{rank+1}_reverseprocess.pdb'))
 
         except Exception as e:
-            logger.warning("Failed on", orig_complex_graph["name"], e)
+            try:
+                complex_name = orig_complex_graph["name"]
+            except Exception:
+                try:
+                    complex_name = complex_name_list[idx]
+                except Exception:
+                    complex_name = f"complex_{idx}"
+            logger.warning("Failed on %s: %s", complex_name, e, exc_info=e)
             failures += 1
 
     result_msg = f"""
@@ -311,8 +318,9 @@ def main(args):
     else:
         logger.info(result_msg)
     logger.info(f"Results saved in {args.out_dir}")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
     _args = get_parser().parse_args()
-    main(_args)
+    raise SystemExit(main(_args))
