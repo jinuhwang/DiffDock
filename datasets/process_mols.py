@@ -320,11 +320,50 @@ def generate_conformer(mol):
     return False
 
 
+def _sanitize_mol_with_aromatic_fallback(mol):
+    """
+    Try to sanitize a molecule, retrying with aromatic flags cleared if kekulization fails.
+    This keeps problematic ligands usable instead of failing outright.
+    """
+    try:
+        Chem.SanitizeMol(mol)
+        return mol
+    except Exception as exc:
+        if 'kekul' not in str(exc).lower():
+            raise
+        get_logger().warning(
+            "Failed to sanitize molecule (kekulization); retrying with aromatic flags cleared: %s",
+            exc,
+        )
+        mol_copy = Chem.Mol(mol)
+        for atom in mol_copy.GetAtoms():
+            if atom.GetIsAromatic():
+                atom.SetIsAromatic(False)
+        for bond in mol_copy.GetBonds():
+            if bond.GetIsAromatic():
+                bond.SetIsAromatic(False)
+            if bond.GetBondType() == BT.AROMATIC:
+                bond.SetBondType(BT.SINGLE)
+        Chem.SanitizeMol(mol_copy, sanitizeOps=Chem.SanitizeFlags.SANITIZE_ALL ^ Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+        return mol_copy
+
+
+def remove_hs_safe(mol, sanitize=True):
+    """Remove hydrogens, falling back to skipping sanitization if it fails."""
+    if not sanitize:
+        return RemoveHs(mol, sanitize=False)
+    try:
+        return RemoveHs(mol, sanitize=True)
+    except Exception as exc:
+        get_logger().warning("RemoveHs failed with sanitization; retrying without sanitization: %s", exc)
+        return RemoveHs(mol, sanitize=False)
+
+
 def get_lig_graph_with_matching(mol_, complex_graph, popsize, maxiter, matching, keep_original, num_conformers, remove_hs, tries=10, skip_matching=False):
     if matching:
         mol_maybe_noh = copy.deepcopy(mol_)
         if remove_hs:
-            mol_maybe_noh = RemoveHs(mol_maybe_noh, sanitize=True)
+            mol_maybe_noh = remove_hs_safe(mol_maybe_noh, sanitize=True)
             mol_maybe_noh = AllChem.RemoveAllHs(mol_maybe_noh)
         if keep_original:
             positions = []
@@ -335,7 +374,7 @@ def get_lig_graph_with_matching(mol_, complex_graph, popsize, maxiter, matching,
         # rotatable_bonds = get_torsion_angles(mol_maybe_noh)
         _tmp = copy.deepcopy(mol_)
         if remove_hs:
-            _tmp = RemoveHs(_tmp, sanitize=True)
+            _tmp = remove_hs_safe(_tmp, sanitize=True)
         _tmp = AllChem.RemoveAllHs(_tmp)
         rotatable_bonds = get_torsion_angles(_tmp)
 
@@ -348,7 +387,7 @@ def get_lig_graph_with_matching(mol_, complex_graph, popsize, maxiter, matching,
                 mol_rdkit = AllChem.AddHs(mol_rdkit)
                 generate_conformer(mol_rdkit)
                 if remove_hs:
-                    mol_rdkit = RemoveHs(mol_rdkit, sanitize=True)
+                    mol_rdkit = remove_hs_safe(mol_rdkit, sanitize=True)
                 mol_rdkit = AllChem.RemoveAllHs(mol_rdkit)
                 mol = AllChem.RemoveAllHs(copy.deepcopy(mol_maybe_noh))
                 if rotatable_bonds and not skip_matching:
@@ -374,7 +413,7 @@ def get_lig_graph_with_matching(mol_, complex_graph, popsize, maxiter, matching,
 
     else:  # no matching
         complex_graph.rmsd_matching = 0
-        if remove_hs: mol_ = RemoveHs(mol_)
+        if remove_hs: mol_ = remove_hs_safe(mol_)
         get_lig_graph(mol_, complex_graph)
 
     edge_mask, mask_rotate = get_transformation_mask(complex_graph)
@@ -449,7 +488,7 @@ def read_molecule(molecule_file, sanitize=False, calc_charges=False, remove_hs=F
     def _prepare_molecule(base_mol, do_sanitize, do_charges, do_remove_hs):
         processed = Chem.Mol(base_mol)
         if do_sanitize or do_charges:
-            Chem.SanitizeMol(processed)
+            processed = _sanitize_mol_with_aromatic_fallback(processed)
         if do_charges:
             try:
                 AllChem.ComputeGasteigerCharges(processed)
