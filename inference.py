@@ -110,11 +110,28 @@ def main(args):
     configure_logger(args.loglevel)
     logger = get_logger()
 
+    # Capture parser defaults so we only let the config file fill values the user didn't override on the CLI.
+    parser_defaults = vars(get_parser().parse_args([]))
+
     if args.config:
-        config_dict = yaml.load(args.config, Loader=yaml.FullLoader)
+        config_source = args.config
+        close_source = False
+        if isinstance(config_source, str):
+            config_source = open(config_source, "r")
+            close_source = True
+        try:
+            config_dict = yaml.load(config_source, Loader=yaml.FullLoader) or {}
+        finally:
+            if close_source:
+                config_source.close()
+        if not isinstance(config_dict, dict):
+            raise ValueError("Config file must contain a mapping at the top level")
         arg_dict = args.__dict__
         for key, value in config_dict.items():
-            if isinstance(value, list):
+            # Skip keys the user already overrode on the CLI.
+            if arg_dict.get(key) != parser_defaults.get(key):
+                continue
+            if isinstance(value, list) and isinstance(arg_dict.get(key), list):
                 for v in value:
                     arg_dict[key].append(v)
             else:
