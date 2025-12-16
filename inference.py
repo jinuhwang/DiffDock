@@ -137,6 +137,17 @@ def main(args):
             else:
                 arg_dict[key] = value
 
+    effective_steps = (
+        args.actual_steps if args.actual_steps is not None else args.inference_steps
+    )
+    logger.info(
+        "Reverse diffusion steps per sample: %s (inference_steps=%s, actual_steps=%s)",
+        effective_steps,
+        args.inference_steps,
+        args.actual_steps,
+    )
+    logger.info("Samples per complex: %s", args.samples_per_complex)
+
     # Download models if they don't exist locally
     if not os.path.exists(args.model_dir):
         logger.info(f"Models not found. Downloading")
