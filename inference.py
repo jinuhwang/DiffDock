@@ -334,6 +334,10 @@ def main(args):
                     complex_name = complex_name_list[idx]
                 except Exception:
                     complex_name = f"complex_{idx}"
+            if isinstance(e, ValueError) and "No edges and no nodes" in str(e):
+                logger.warning("Skipped %s due to empty receptor graph: %s", complex_name, e)
+                skipped += 1
+                continue
             logger.warning("Failed on %s: %s", complex_name, e, exc_info=e)
             failures += 1
 

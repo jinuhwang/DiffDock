@@ -261,19 +261,34 @@ def rigid_transform_Kabsch_3D_torch_batch(A, B):
     Am = A - centroid_A
     Bm = B - centroid_B
     H = torch.bmm(Am, Bm.transpose(1, 2))
+    H = torch.nan_to_num(H, nan=0.0, posinf=0.0, neginf=0.0)
 
     # find rotation
     try:
         U, S, Vt = torch.linalg.svd(H)
     except Exception:
-        # Fallback for ill-conditioned batches: add tiny jitter, fall back to CPU if needed.
+        # Fallback for ill-conditioned batches: add jitter, fall back to CPU/double, then identity.
         eye = torch.eye(3, device=H.device, dtype=H.dtype).unsqueeze(0).expand_as(H)
-        jittered = H + 1e-6 * eye
-        try:
-            U, S, Vt = torch.linalg.svd(jittered)
-        except Exception:
-            U, S, Vt = torch.linalg.svd(jittered.cpu())
-            U, S, Vt = U.to(H.device), S.to(H.device), Vt.to(H.device)
+        U = S = Vt = None
+        for eps in (1e-6, 1e-5, 1e-4, 1e-3):
+            try:
+                U, S, Vt = torch.linalg.svd(H + eps * eye)
+                break
+            except Exception:
+                continue
+        if U is None:
+            try:
+                U, S, Vt = torch.linalg.svd((H + 1e-3 * eye).double().cpu())
+                U, S, Vt = (
+                    U.to(H.device, dtype=H.dtype),
+                    S.to(H.device, dtype=H.dtype),
+                    Vt.to(H.device, dtype=H.dtype),
+                )
+            except Exception:
+                batch = H.shape[0]
+                U = torch.eye(3, device=H.device, dtype=H.dtype).unsqueeze(0).expand(batch, 3, 3)
+                Vt = U.clone()
+                S = torch.ones((batch, 3), device=H.device, dtype=H.dtype)
     R = torch.bmm(Vt.transpose(1, 2), U.transpose(1, 2))
 
     # reflection case
@@ -322,6 +337,5 @@ def rigid_transform_Kabsch_independent_torch(A, B):
     t = - centroid_A + centroid_B # note does not change rotation
     R_vec = matrix_to_axis_angle(R)
     return t, R_vec
-
 
 
